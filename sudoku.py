@@ -45,7 +45,7 @@ def get_sudoku_mask(img):
     mask = np.zeros_like(img) 
     mask = cv.fillPoly(mask, sudoku_contours, 255)
 
-    return mask
+    return mask, sudoku_contours
 
 def reorder_corners(corners):
         s = corners.sum(axis = 1)
@@ -72,6 +72,48 @@ def get_sudoku_proj(img, sudoku_contours):
 
         sudoku_projections.append(projection)
 
+    return sudoku_projections
+
+def table_preprocess(img):
+    img = cv.erode(img, np.ones((4,4)), iterations=2)
+    img = cv.dilate(img, np.ones((3,3)), iterations=3)
+    threshold, img = cv.threshold(img, 0, 255, cv.THRESH_BINARY_INV & cv.THRESH_OTSU)
+    
+    return img
+
+def predict_digit(digit_img):
+    return 0
+
+def get_digits(img):
+    cell_width = img.shape[0] // 9
+    cell_height = img.shape[1] // 9
+
+    sudoku_digits = [[-1 for i in range(9)] for j in range(9)]
+
+    for i in range(9):
+        for j in range(9):
+            x_ul, y_ul = j * cell_width, i * cell_height
+            cell_img = img[y_ul:y_ul+cell_height, x_ul:x_ul+cell_width]
+            cell_img = cell_img[cell_height//10:-cell_height//10, cell_width//10:-cell_width//10]
+            contours,hierarchy = cv.findContours(cell_img, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
+            if len(contours) != 0:
+                for contour in contours:
+                    x,y,w,h = cv.boundingRect(contour)
+                    if (h > cell_height // 2) and (w > cell_width // 5):    
+                        digit_img = cell_img[y-5:y+h+5, x-5:x+w+5]
+                        digit_img = cv.resize(digit_img,(28,28))
+                        digit_img = digit_img.reshape(1, 28, 28, 1)
+                        digit_img = digit_img / 255
+                        prediction = predict_digit(digit_img)
+                        digit = np.argmax(prediction)
+                        sudoku_digits[i][j] = digit
+    
+    result = []
+    result.append(np.int16(sudoku_digits))
+
+    return result
+
+
 def predict_image(image: np.ndarray):
     image = preprocess(image)
     sudoku_digits = [
@@ -85,7 +127,16 @@ def predict_image(image: np.ndarray):
                   [-1, -1, -1,  9,  1,  3, -1, -1, -1],
                   [-1, -1, -1, -1, -1, -1, -1, -1, -1]]),
     ]
-    mask = get_sudoku_mask(image)
+    mask, sudoku_contours = get_sudoku_mask(image)
+
+    masked_image = cv.bitwise_and(mask, image)
+
+    sudoku_projections = get_sudoku_proj(masked_image, sudoku_contours)
+
+    sudoku_digits = []
+
+    for projection in sudoku_projections:
+        sudoku_digits.append(get_digits(projection))
 
     # loading train image:
     #train_img_4 = cv.imread('/autograder/source/train/train_4.jpg', 0)
